@@ -1,44 +1,134 @@
-ENV["BUNDLE_GEMFILE"] ||= File.expand_path("../Gemfile", __FILE__)
+# encoding: UTF-8
+# frozen_string_literal: true
 
-require "bundler"
-require "bundler/setup"
-Bundler.require :default, :development
-require "active_support/core_ext/string"
-require "active_support/core_ext/array"
 require "json"
+require "date"
+require "active_support/core_ext/string/filters"
+require "active_support/core_ext/array/grouping"
+require "nokogiri"
+require "colorize"
+require "faraday"
 
-def print_courses(source, courses)
+def useful_currencies
+  ["USD", "EUR", "CAD", "RUB", "BTC"]
+end
+
+def normalize_currency_name(ccy)
+  ccy = ccy.squish.upcase
+  case ccy
+    when "RUR" then "RUB"
+    else ccy
+  end
+end
+
+def colorize_currency_name(ccy, colorizable)
+  case ccy
+    when "USD" then colorizable.colorize(:red)
+    else colorizable
+  end
+end
+
+def colorize_currency_rate(ccy, rate)
+  case ccy
+    when "USD" then rate.colorize(:white)
+    else rate
+  end
+end
+
+def format_currency_rate(ccy, rate)
+  "%.8f" % rate
+end
+
+def print_rates(source, rates)
+  existing_currencies = useful_currencies.select { |ccy| rates.key?(ccy) }
+  existing_rates      = existing_currencies.map { |ccy| rates[ccy] }.compact
+  return if existing_currencies.empty? || existing_rates.empty?
+
+  # Support data for padding calculation.
+  longest_currency_name  = existing_currencies.sort_by(&:length).last
+  heading_padding_length = longest_currency_name.length + (15 - existing_rates.first[:buy].round.to_s.size - 1 - 8)
+
+  # If source doesn't buy currency from us.
+  buy_only               = existing_rates.none? { |rate| rate.key?(:sell) }
+
   print source.colorize(:yellow), "\n"
-  print " " * 3, "    ", "YOU BUY".underline, " " * 7, "YOU SELL".underline, "\n"
-  
-  ["USD", "EUR", "RUB", "BTC"].each do |ccy|
-    if (course = courses[ccy])
-      print ccy.ljust(4).colorize(ccy === "USD" ? :red : :default), 
-            ("%.8f" % course[:buy]).rjust(14).colorize(ccy === "USD"  ? :light_magenta : :default), 
-            ("%.8f" % course[:sell]).rjust(14).colorize(ccy === "USD" ? :light_magenta : :default), "\n"
-    end  
+  print " " * heading_padding_length, "YOU BUY".underline
+  print " " * 8, "YOU SELL".underline unless buy_only
+  print "\n"
+
+  existing_rates.each do |rate|
+    ccy = rate[:ccy]
+    print colorize_currency_name(ccy, ccy.ljust(useful_currencies.map(&:length).max)),
+          colorize_currency_rate(ccy, format_currency_rate(ccy, rate[:buy]).rjust(15))
+    print colorize_currency_rate(ccy, format_currency_rate(ccy, rate[:sell]).rjust(15)) unless buy_only
+    print "\n"
   end
   
   print "\n"
-end    
+end
 
-def privat_courses
-  courses = {}
-  JSON.load(Faraday.get("https://api.privatbank.ua/p24api/pubinfo?json&exchange&coursid=3").body).tap do |x|
-    x.each { |y| courses[y["ccy"] == "RUR" ? "RUB" : y["ccy"]] = { buy: y["buy"].to_f, sell: y["sale"].to_f } }
+def privatbank_exchange_office_rates
+  rates = {}
+  JSON.load(Faraday.get("https://api.privatbank.ua/p24api/pubinfo?json&exchange&coursid=5").body).tap do |x|
+    x.each do |y|
+      ccy        = normalize_currency_name(y["ccy"])
+      rates[ccy] = { ccy: ccy, buy: y["sale"].to_f, sell: y["buy"].to_f }
+    end
   end
-  print_courses("PrivatBank", courses)
-end    
+  print_rates("PrivatBank (currency exchange office)", rates)
+end
 
-def black_market_courses
-  courses  = {}
+def privatbank_cashless_rates
+  rates = {}
+  JSON.load(Faraday.get("https://api.privatbank.ua/p24api/pubinfo?json&exchange&coursid=11").body).tap do |x|
+    x.each do |y|
+      ccy        = normalize_currency_name(y["ccy"])
+      rates[ccy] = { ccy: ccy, buy: y["sale"].to_f, sell: y["buy"].to_f }
+    end
+  end
+  print_rates("PrivatBank (cashless)", rates)
+end
+
+def national_bank_of_ukraine_rates
+  rates = {}
+  JSON.load(Faraday.get("https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange?json").body).tap do |x|
+    x.each do |y|
+      ccy        = normalize_currency_name(y["cc"])
+      rates[ccy] = { ccy: ccy, buy: y["rate"].to_f }
+    end
+  end
+  print_rates("National Bank of Ukraine", rates)
+end
+
+def finance_ua_black_market_rates
+  rates    = {}
   document = Nokogiri::HTML.fragment(Faraday.get("https://finance.ua/").body) { |config| config.nonet.huge.nowarning.noerror }
   td_els   = document.at_css("#table-currency-tab0").css("> table > tbody > tr:nth-child(2n+1) > td")
   td_els.to_a.in_groups_of 3, false do |group|
-    courses[group[0].text.squish.upcase] = { buy: group[2].text.squish.upcase.to_f, sell: group[1].text.squish.upcase.to_f }
+    ccy        = normalize_currency_name(group[0].text)
+    rates[ccy] = { ccy: ccy, buy: group[2].text.squish.to_f, sell: group[1].text.squish.to_f }
   end
-  print_courses("Black Market", courses)
+  print_rates("Black Market (finance.ua)", rates)
 end
 
-privat_courses
-black_market_courses
+def finance_i_ua_black_market_rates
+  rates    = {}
+  document = Nokogiri::HTML.fragment(Faraday.get("http://finance.i.ua/").body) { |config| config.nonet.huge.nowarning.noerror }
+  document.at_css(".widget-currency_cash").css("tbody tr").each do |tr|
+    ccy        = normalize_currency_name(tr.at_css("th").text)
+    tds        = tr.css("td")
+    rates[ccy] = { ccy: ccy, buy: tds[1].text.squish.to_f, sell: tds[0].text.squish.to_f }
+  end
+  print_rates("Black Market (finance.i.ua)", rates)
+end
+
+print "Today's currency exchange rates in Ukraine".colorize(:yellow),
+      "\n",
+      Date.today.strftime("%A, %B %e, %Y").underline,
+      "\n\n"
+
+national_bank_of_ukraine_rates
+privatbank_exchange_office_rates
+privatbank_cashless_rates
+finance_ua_black_market_rates
+finance_i_ua_black_market_rates
