@@ -113,7 +113,7 @@ end
 
 def finance_i_ua_black_market_rates
   rates    = {}
-  document = Nokogiri::HTML.fragment(Faraday.get("http://finance.i.ua/").body) { |config| config.nonet.huge.nowarning.noerror }
+  document = Nokogiri::HTML.fragment(Faraday.get("https://finance.i.ua/").body) { |config| config.nonet.huge.nowarning.noerror }
   document.at_css(".widget-currency_cash").css("tbody tr").each do |tr|
     ccy        = normalize_currency_name(tr.at_css("th").text)
     tds        = tr.css("td")
