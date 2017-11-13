@@ -3,7 +3,7 @@
 
 Gem::Specification.new do |s|
   s.name            = "ccy-rates"
-  s.version         = "1.0.1"
+  s.version         = "1.0.2"
   s.author          = "Yaroslav Konoplov"
   s.email           = "eahome00@gmail.com"
   s.summary         = "Currency exchange rates in your shell."

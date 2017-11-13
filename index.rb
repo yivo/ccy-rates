@@ -68,58 +68,73 @@ def print_rates(source, rates)
 end
 
 def privatbank_exchange_office_rates
+  url   = "https://api.privatbank.ua/p24api/pubinfo?json&exchange&coursid=5"
   rates = {}
-  JSON.load(Faraday.get("https://api.privatbank.ua/p24api/pubinfo?json&exchange&coursid=5").body).tap do |x|
+  JSON.load(Faraday.get(url).body).tap do |x|
     x.each do |y|
       ccy        = normalize_currency_name(y["ccy"])
       rates[ccy] = { ccy: ccy, buy: y["sale"].to_f, sell: y["buy"].to_f }
     end
   end
   print_rates("PrivatBank (currency exchange office)", rates)
+rescue Faraday::Error => e
+  warn "Failed to load #{url}: #{e.inspect}."
 end
 
 def privatbank_cashless_rates
+  url   = "https://api.privatbank.ua/p24api/pubinfo?json&exchange&coursid=11"
   rates = {}
-  JSON.load(Faraday.get("https://api.privatbank.ua/p24api/pubinfo?json&exchange&coursid=11").body).tap do |x|
+  JSON.load(Faraday.get(url).body).tap do |x|
     x.each do |y|
       ccy        = normalize_currency_name(y["ccy"])
       rates[ccy] = { ccy: ccy, buy: y["sale"].to_f, sell: y["buy"].to_f }
     end
   end
   print_rates("PrivatBank (cashless)", rates)
+rescue Faraday::Error => e
+  warn "Failed to load #{url}: #{e.inspect}."
 end
 
 def national_bank_of_ukraine_rates
+  url   = "https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange?json"
   rates = {}
-  JSON.load(Faraday.get("https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange?json").body).tap do |x|
+  JSON.load(Faraday.get(url).body).tap do |x|
     x.each do |y|
       ccy        = normalize_currency_name(y["cc"])
       rates[ccy] = { ccy: ccy, buy: y["rate"].to_f }
     end
   end
   print_rates("National Bank of Ukraine", rates)
+rescue Faraday::Error => e
+  warn "Failed to load #{url}: #{e.inspect}."
 end
 
 def finance_ua_black_market_rates
+  url      = "https://finance.ua/"
   rates    = {}
-  document = Nokogiri::HTML.fragment(Faraday.get("https://finance.ua/").body) { |config| config.nonet.huge.nowarning.noerror }
+  document = Nokogiri::HTML.fragment(Faraday.get(url).body) { |config| config.nonet.huge.nowarning.noerror }
   td_els   = document.at_css("#table-currency-tab0").css("> table > tbody > tr:nth-child(2n+1) > td")
   td_els.to_a.in_groups_of 3, false do |group|
     ccy        = normalize_currency_name(group[0].text)
     rates[ccy] = { ccy: ccy, buy: group[2].text.squish.to_f, sell: group[1].text.squish.to_f }
   end
   print_rates("Black Market (finance.ua)", rates)
+rescue Faraday::Error => e
+  warn "Failed to load #{url}: #{e.inspect}."
 end
 
 def finance_i_ua_black_market_rates
+  url      = "https://finance.i.ua/"
   rates    = {}
-  document = Nokogiri::HTML.fragment(Faraday.get("https://finance.i.ua/").body) { |config| config.nonet.huge.nowarning.noerror }
+  document = Nokogiri::HTML.fragment(Faraday.get(url).body) { |config| config.nonet.huge.nowarning.noerror }
   document.at_css(".widget-currency_cash").css("tbody tr").each do |tr|
     ccy        = normalize_currency_name(tr.at_css("th").text)
     tds        = tr.css("td")
     rates[ccy] = { ccy: ccy, buy: tds[1].text.squish.to_f, sell: tds[0].text.squish.to_f }
   end
   print_rates("Black Market (finance.i.ua)", rates)
+rescue Faraday::Error => e
+  warn "Failed to load #{url}: #{e.inspect}."
 end
 
 print "Today's currency exchange rates in Ukraine".colorize(:yellow),
